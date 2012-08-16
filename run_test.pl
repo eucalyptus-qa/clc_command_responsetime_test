@@ -244,9 +244,8 @@ my $included_env = "source $ENV{'PWD'}/etc/default.env; ";
 
 # get the credentials for the testee system   ... prob... not bash
 if( $cred_included eq "YES" ){
-	$included_env .= "source $ENV{'PWD'}/credentials/eucarc; ";
-}else{
-	# not sure ....dynamically load it ??
+#	$included_env .= "source $ENV{'PWD'}/credentials/eucarc; ";
+	$included_env .= "if [ -f $ENV{'PWD'}/credentials/eucarc ]; then source ../credentials/eucarc; fi; ";
 };
 
 # process ENV file
@@ -255,6 +254,17 @@ if( $env_file ne "" ){
 };
 
 my $bash_setup = "bash -c \"" . $included_env;
+
+
+###	ANDY'S PATCH	ADDED 010412
+if( -e "../shared/python" ){
+	# Make python module sharing work
+	my @pypaths = split(":", $ENV{'PYTHONPATH'});
+	my $sharedpypath = `readlink -f "../shared/python"`;
+	chomp($sharedpypath);
+	push(@pypaths, $sharedpypath);
+	$ENV{'PYTHONPATH'} = join(":", @pypaths);
+};
 
 #### STAGE INDEX AND POINTERS SETUP ############################
 
@@ -393,7 +403,7 @@ sub process_stages{
 
 				chdir("./lib");
 				my $cmd = construct_cmd( "./" . find_lib_script($check) );
-				timed_run($cmd, 0 );
+				timed_run($cmd, 1800 );
 				chdir("$ENV{'PWD'}");
 			}else{
 				print "\n" . get_time() . "\t";
@@ -408,11 +418,11 @@ sub process_stages{
 				};
 
 				my $cmd = construct_cmd("$check");
-				timed_run($cmd, 0 );
+				timed_run($cmd, 1800 );
 				chdir("$ENV{'PWD'}");
 			};
 			
-			process_output( $check,  "pre_cond",  $this_stage, $this_trial, $display_option );
+			process_output( $check,  "pre_cond",  $this_stage, $this_trial, $display_option, 0 );
 	
 			if( check_exit_code($check, "pre_cond", $this_stage, $this_trial) ){
 				return 1;
@@ -448,7 +458,7 @@ sub process_stages{
 			my $cmd = construct_cmd("./run_test.pl ". $check . ".conf " . $this_argv );
 			$is_timed_out = timed_run($cmd, $s->{'TIMEOUT'} );
 			chdir("$ENV{'PWD'}");
-			process_output( $check,  "run",  $this_stage, $this_trial, $display_option );
+			process_output( $check,  "run",  $this_stage, $this_trial, $display_option, $is_timed_out );
 		}else{
 			if( $check =~ /^_/ ){
 				print "\n" . get_time() . "\t";
@@ -474,7 +484,7 @@ sub process_stages{
 				$is_timed_out = timed_run($cmd, $s->{'TIMEOUT'} );
 				chdir("$ENV{'PWD'}");
 			};
-			process_output( $check,  "run",  $this_stage, $this_trial, $display_option );
+			process_output( $check,  "run",  $this_stage, $this_trial, $display_option, $is_timed_out );
 		};
 
 		if( check_exit_code($check, "main_run", $this_stage, $this_trial) ){
@@ -482,8 +492,11 @@ sub process_stages{
 		};
 
 		if( $is_timed_out ){
+			print "\n";
 			print "\n" . get_time() . "\t[TEST_REPORT]\tFAILED ::";
-			print "\tCommand $check TIMED OUT !! at Trial $this_trial Stage $this_stage \n";
+			print " Command $check TIMED OUT !! at Trial $this_trial Stage $this_stage \n";
+			print "\n";
+			print "\n";
 			return 1;
 		};
 
@@ -504,7 +517,7 @@ sub process_stages{
 
 				chdir("./lib");
 				my $cmd = construct_cmd( "./" . find_lib_script($check) );
-				timed_run($cmd, 0 );
+				timed_run($cmd, 1800 );
 				chdir("$ENV{'PWD'}");
                         }else{
                                 print "\n" . get_time() . "\t";
@@ -519,11 +532,11 @@ sub process_stages{
                                 };
 
 				my $cmd = construct_cmd("$check");
-				timed_run($cmd, 0 );
+				timed_run($cmd, 1800 );
 				chdir("$ENV{'PWD'}");
 			};
 
-			process_output( $check,  "post_cond",  $this_stage, $this_trial, $display_option );
+			process_output( $check,  "post_cond",  $this_stage, $this_trial, $display_option, 0 );
 
 			if( check_exit_code($check, "post_cond", $this_stage, $this_trial) ){
 				return 1;
@@ -575,10 +588,19 @@ sub find_lib_script{
 
 
 sub process_output{
-	my ($script, $this_cond, $this_stage, $this_trial, $this_option ) = @_;
+	my ($script, $this_cond, $this_stage, $this_trial, $this_option, $is_timed_out ) = @_;
 
 	print "\n";
 	if( $this_option == 1 || $this_option == 3 ){
+
+		if( $is_timed_out ){
+			print "\n";
+			print "\n" . get_time() . "\t[TEST_REPORT]\tFAILED ::";
+                        print " Script $script TIMED OUT !! at Trial $this_trial Stage $this_stage \n";
+			print "\n";
+			print "\n";
+		};
+
 		if( was_outstr() ){
                         print "<<<<<<<<<<<<<<<<<<<<<<  STDOUT  >>>>>>>>>>>>>>>>>>>>>>>>>\n\n" . get_recent_outstr() . "\n";
 			print "<<<<<<<<<<<<<<<<<<<  END of STDOUT  >>>>>>>>>>>>>>>>>>>>>\n";
@@ -592,9 +614,9 @@ sub process_output{
 
 	if( $this_option == 2 || $this_option == 3 ){
 
-		if( length( $script ) > 200 ){
-			$script = substr($script, 0, 199);
-		};
+	#	if( length( $script ) > 200 ){
+	#		$script = substr($script, 0, 199);
+	#	};
 
 		if( $script =~ /^\.\// ){
 			$script =~ s/\.\///;
@@ -603,6 +625,20 @@ sub process_output{
 		$script =~ s/\//_slash_/g;
 		$script =~ s/\s+/_/g;
 		$script =~ s/\./_dot_/g;
+
+		###	ADDED TO CHOP OFF LONG SCRIPT NAME	081512
+		if( length($script) > 200 ){
+			$script = substr($script, 0, 200);
+		};
+
+		###	ADDED TO KEEP OUTPUT IN ORDER		081512
+		if( $this_cond eq "pre_cond" ){
+			$this_cond = "0-" . $this_cond;
+		}elsif( $this_cond eq "post_cond" ){
+			$this_cond = "2-" . $this_cond;
+		}elsif( $this_cond eq "run" ){
+			$this_cond = "1-" . $this_cond;
+		};
 
 		my $out_filename = "$ENV{'PWD'}/artifacts/trial-" . sprintf("%04d", $this_trial) . 
 				"-stage-" . sprintf("%03d", $this_stage) .
@@ -614,6 +650,15 @@ sub process_output{
 	
 		open( OUT, "> $out_filename" ) or die "Error : $!\t$out_filename doesn't exist\n";
 	#	open( ERR, "> $err_filename" ) or die $!;
+
+		if( $is_timed_out ){
+			print OUT "\n";
+			print OUT "\n" . get_time() . "\t[TEST_REPORT]\tFAILED ::";
+                        print OUT " Script $script TIMED OUT !! at Trial $this_trial Stage $this_stage \n";
+			print OUT "\n";
+			print OUT "\n";
+		};
+
 		if( was_outstr() ){
 			print OUT "<<<<<<<<<<<<<<<<<<<<<<  STDOUT  >>>>>>>>>>>>>>>>>>>>>>>>>\n\n" . get_recent_outstr() . "\n";
 			print OUT "<<<<<<<<<<<<<<<<<<<  END of STDOUT  >>>>>>>>>>>>>>>>>>>>>\n";
